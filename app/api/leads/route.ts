@@ -25,13 +25,19 @@ export async function POST(req: Request) {
     const db = adminSupabase()
 
     // leads 记录（重复不阻塞）
-    await db.from('leads').insert({
-      email, school, role: role || 'buyer', answers: answers || {},
-    }).then(({ error }) => { if (error) console.warn('leads insert warn:', error.message) })
+    await db
+      .from('leads')
+      .insert({ email, school, role: role || 'buyer', answers: answers || {} })
+      .then(({ error }) => {
+        if (error) console.warn('leads insert warn:', error.message)
+      })
 
     // 1) 找商家
     const { data: partner, error: pErr } = await db
-      .from('partners').select('*').eq('slug', 'clucknsip').maybeSingle()
+      .from('partners')
+      .select('*')
+      .eq('slug', 'clucknsip')
+      .maybeSingle()
     if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 })
     if (!partner) return NextResponse.json({ error: 'partner_not_found' }, { status: 404 })
 
@@ -88,21 +94,27 @@ export async function POST(req: Request) {
       })
       if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 })
       // 计数 +1（非强制）
-      await db.from('offers')
-        .update({ total_issued: (offer.total_issued ?? 0) + 1 })
-        .eq('id', offer.id)
+      await db.from('offers').update({ total_issued: (offer.total_issued ?? 0) + 1 }).eq('id', offer.id)
     }
 
-    // 4) 发邮件（本地没 key 自动跳过）
-    if (resend) {
-      await resend.emails.send({
-        from: FROM,
-        to: email,
-        subject: 'Your GoodLoop discount code 🎉',
-        react: CouponEmail({ code, school }),
-      })
+    // 4) 发邮件（未配置 RESEND 时跳过）
+    const canSend = Boolean(resend && FROM)
+    console.log('EMAIL_DEBUG canSend=', canSend, 'hasKey=', !!RESEND_KEY, 'from=', FROM)
+
+    if (canSend) {
+      try {
+        const resp = await resend!.emails.send({
+          from: FROM!,
+          to: email,
+          subject: 'Your GoodLoop discount code 🎉',
+          react: CouponEmail({ code, school }),
+        })
+        console.log('EMAIL_DEBUG sent ok:', (resp as any)?.id || resp)
+      } catch (err) {
+        console.error('EMAIL_DEBUG send error:', err)
+      }
     } else {
-      console.warn('RESEND not configured; skipped sending email')
+      console.warn('EMAIL_DEBUG skipped sending email')
     }
 
     return NextResponse.json({ ok: true })
@@ -111,3 +123,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'server_error', detail: e?.message }, { status: 500 })
   }
 }
+
+  
